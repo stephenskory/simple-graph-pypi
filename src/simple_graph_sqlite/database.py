@@ -222,6 +222,29 @@ def traverse(db_file, src, tgt=None, neighbors_fn=find_neighbors, with_bodies=Fa
     return atomic(db_file, _traverse)
 
 
+def traverse_fast(db_file, src, tgt=None, neighbors_fn=find_neighbors, with_bodies=False):
+    '''Doesn't respect the order of the path, but much faster if all you care about is
+    the list of neighbors'''
+    def _traverse(cursor):
+        path = set([])
+        target = json.dumps(tgt)
+        for row in cursor.execute(neighbors_fn(with_bodies=with_bodies), (src,)):
+            if row:
+                if with_bodies:
+                    identifier, obj, _ = row
+                    path.add(identifier)
+                    if identifier == target and obj == '()':
+                        break
+                else:
+                    identifier = row[0]
+                    if identifier not in path:
+                        path.add(identifier)
+                        if identifier == target:
+                            break
+        return list(path)
+    return atomic(db_file, _traverse)
+
+
 def connections_in():
     return read_sql('search-edges-inbound.sql')
 
@@ -240,3 +263,22 @@ def get_connections(identifier):
     def _get_connections(cursor):
         return cursor.execute(read_sql('search-edges.sql'), (identifier, identifier,)).fetchall()
     return _get_connections
+
+
+def get_connections_iter(db_file, identifier):
+    connection = sqlite3.connect(db_file)
+    cursor = connection.cursor()
+    cursor.arraysize = 1000
+    cursor.execute("PRAGMA foreign_keys = TRUE;")
+    cursor.execute(
+        read_sql("search-edges.sql"),
+        (
+            identifier,
+            identifier,
+        ),
+    )
+    rows = cursor.fetchmany()
+    while rows:
+        yield rows
+        rows = cursor.fetchmany()
+    connection.close()
